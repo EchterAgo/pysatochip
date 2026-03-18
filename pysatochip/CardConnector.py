@@ -5,6 +5,7 @@ from smartcard.CardMonitoring import CardMonitor, CardObserver
 from smartcard.Exceptions import CardConnectionException, CardRequestTimeoutException
 from smartcard.util import toHexString, toBytes
 from smartcard.sw.SWExceptions import SWException
+from smartcard.System import readers as list_smartcard_readers
 
 from .JCconstants import *
 from .CardDataParser import CardDataParser
@@ -102,11 +103,19 @@ class RemovalObserver(CardObserver):
     def __init__(self, cc):
         self.cc=cc
         self.observer = LogCardConnectionObserver() #ConsoleCardConnectionObserver()
+    
+    def _matches_reader(self, card):
+        """Returns True if the card matches the configured reader (or no reader filter is set)."""
+        if self.cc.reader_name is None:
+            return True
+        return self.cc.reader_name == card.reader
             
     def update(self, observable, actions):
         (addedcards, removedcards) = actions
         for card in addedcards:
             if card.atr == [59, 141, 1, 128, 251, 160, 0, 0, 3, 151, 66, 84, 70, 89, 4, 1, 207]: continue # Ignore Windows Hello for Business virtual device (3B 8D 01 80 FB A0 00 00 03 97 42 54 46 59 04 01 CF)
+            if not self._matches_reader(card):
+                continue
             #TODO check ATR and check if more than 1 card?
             logger.info(f"+Inserted: {toHexString(card.atr)}")
             self.cc.card_present= True
@@ -157,6 +166,8 @@ class RemovalObserver(CardObserver):
                     self.cc.client.request('show_error',msg)   
                 
         for card in removedcards:
+            if not self._matches_reader(card):
+                continue
             logger.info(f"-Removed: {toHexString(card.atr)}")
             self.cc.card_disconnect()
              
@@ -169,7 +180,7 @@ class CardConnector:
     SEEDKEEPER_AID= [0x53,0x65,0x65,0x64,0x4b,0x65,0x65,0x70,0x65,0x72]  #SeedKeeper
     SATODIME_AID= [0x53, 0x61, 0x74, 0x6f, 0x44, 0x69, 0x6d, 0x65] #SatoDime
     
-    def __init__(self, client=None, loglevel= logging.WARNING, card_filter=None):
+    def __init__(self, client=None, loglevel= logging.WARNING, card_filter=None, reader_name=None):
         logger.setLevel(loglevel)
         logger.info(f"Logging set to level: {str(loglevel)}")
         logger.debug("In __init__")
@@ -206,8 +217,16 @@ class CardConnector:
 
         # cardservice
         self.cardservice= None #will be instantiated when a card is inserted
+        self.reader_name = reader_name  # specific reader name to use, if any
         try:
-            self.cardrequest = CardRequest(timeout=0, cardType=self.cardtype)
+            target_readers = None
+            if reader_name:
+                # Filter readers to only include the specified one
+                available_readers = list_smartcard_readers()
+                target_readers = [r for r in available_readers if reader_name in str(r)]
+                if not target_readers:
+                    logger.warning(f"Reader '{reader_name}' not found. Available: {[str(r) for r in available_readers]}")
+            self.cardrequest = CardRequest(timeout=0, cardType=self.cardtype, readers=target_readers)
             self.cardservice = self.cardrequest.waitforcard()
             #TODO check ATR and check if more than 1 card?
             self.card_present= True
