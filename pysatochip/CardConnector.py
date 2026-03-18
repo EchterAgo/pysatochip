@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import base64
 import logging
+import threading
 from os import urandom
 from typing import Union
 
@@ -170,7 +171,10 @@ class RemovalObserver(CardObserver):
                 continue
             logger.info(f"-Removed: {toHexString(card.atr)}")
             self.cc.card_disconnect()
-             
+
+        if len(addedcards) > 0:
+            self.cc.card_event.set()
+
 
 class CardConnector:
 
@@ -233,9 +237,13 @@ class CardConnector:
         except CardRequestTimeoutException:
             self.card_present= False
         # monitor if a card is inserted or removed
+        self.card_event = threading.Event()
         self.cardmonitor = CardMonitor()
         self.cardobserver = RemovalObserver(self)
         self.cardmonitor.addObserver(self.cardobserver)
+
+    def wait_for_card_observer(self, timeout=None):
+        return self.card_event.wait(timeout)
 
     def set_mode_factory_reset(self, mode_factory_reset):
         """ WARNING: setting mode_factory_reset to True allows to reset the card to factory and erase all data!"""
