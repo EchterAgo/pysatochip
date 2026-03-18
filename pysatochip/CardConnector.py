@@ -125,8 +125,9 @@ class RemovalObserver(CardObserver):
             self.cc.cardservice.connection.connect()
             self.cc.cardservice.connection.addObserver(self.observer)
             
-            # get CPLC
+            # get CPLC (unselect applet first to ensure CPLC works)
             try:
+                self.cc.card_unselect()
                 (response_CPLC, sw1, sw2) = self.cc.card_get_CPLC()
                 logger.debug(f"DEBUG CPLC: {bytes(response_CPLC).hex()}")
                 (response_IIN, sw1, sw2) = self.cc.card_get_IIN()
@@ -346,6 +347,15 @@ class CardConnector:
 
     def get_sw12(self, sw1, sw2):
         return 16*sw1+sw2
+
+    def card_unselect(self):
+        """Deselect any currently selected applet by selecting the card manager (ISD)."""
+        logger.debug("In card_unselect")
+        ISD_AID = [0xA0, 0x00, 0x00, 0x01, 0x51, 0x00, 0x00]  # Issuer Security Domain
+        apdu = CardConnector.SELECT + [len(ISD_AID)] + ISD_AID
+        # Use raw transmit to bypass secure channel checks
+        (response, sw1, sw2) = self.cardservice.connection.transmit(apdu)
+        return (response, sw1, sw2)
 
     def card_select(self):
         logger.debug("In card_select")
